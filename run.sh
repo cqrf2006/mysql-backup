@@ -12,6 +12,8 @@ MYSQL_USER=${MYSQL_USER:-${MYSQL_ENV_MYSQL_USER}}
 MYSQL_PASS=${MYSQL_PASS:-${MYSQL_ENV_MYSQL_PASS}}
 MYSQL_DB=${MYSQL_DB}
 
+
+
 [ -z "${MYSQL_HOST}" ] && { echo "=> MYSQL_HOST cannot be empty" && exit 1; }
 [ -z "${MYSQL_PORT}" ] && { echo "=> MYSQL_PORT cannot be empty" && exit 1; }
 [ -z "${MYSQL_USER}" ] && { echo "=> MYSQL_USER cannot be empty" && exit 1; }
@@ -23,16 +25,19 @@ echo "=> Creating backup script"
 rm -f /backup.sh
 cat <<EOF >> /backup.sh
 #!/bin/bash
-MAX_BACKUPS=3
-
+USE_GZIP=${USE_GZIP}
 if [ "${MYSQL_DB}" != "--all-databases" ]; then
 	for db in ${MYSQL_DB}
 	do
 		BACKUP_NAME=\${db}-\$(date +\%Y\%m\%d-\%H\%M\%S).sql
 		BACKUP_CMD="mysqldump -h${MYSQL_HOST} -P${MYSQL_PORT} -u${MYSQL_USER} -p${MYSQL_PASS} ${EXTRA_OPTS} \${db}"
-
 		echo "=> Backup started: \${BACKUP_NAME}"
 		if \${BACKUP_CMD} > /backup/\${BACKUP_NAME} ;then
+			if [ \${USE_GZIP} ]; then
+				echo " Starting gzip..."
+				tar zcvfP /backup/\${db}-\$(date +\%Y\%m\%d-\%H\%M\%S).tar.gz /backup/\${BACKUP_NAME}
+				rm -rf /backup/\${BACKUP_NAME}
+			fi
 		    echo "   Backup succeeded"
 		else
     		echo "   Backup failed"
@@ -43,16 +48,20 @@ else
 	MYSQL_DB="--all-databases"
 	BACKUP_NAME=\$(date +\%Y\%m\%d-\%H\%M\%S).sql
 	BACKUP_CMD="mysqldump -h${MYSQL_HOST} -P${MYSQL_PORT} -u${MYSQL_USER} -p${MYSQL_PASS} ${EXTRA_OPTS} \${MYSQL_DB}"
-
 	echo "=> Backup started: \${BACKUP_NAME}"
 	if \${BACKUP_CMD} > /backup/\${BACKUP_NAME} ;then
+		if [ ${USE_GZIP} ]; then
+			echo " Starting gzip..."
+			tar zcvfP /backup/\$(date +\%Y\%m\%d-\%H\%M\%S).tar.gz /backup/\${BACKUP_NAME}
+			rm -rf /backup/\${BACKUP_NAME}
+		fi
 	    echo "   Backup succeeded"
 	else
     	echo "   Backup failed"
    	 	rm -rf /backup/\${BACKUP_NAME}
 	fi
 fi
-
+MAX_BACKUPS=${MAX_BACKUPS}
 if [ -n "\${MAX_BACKUPS}" ]; then
     while [ \$(ls /backup -N1 | wc -l) -gt \${MAX_BACKUPS} ];
     do
@@ -69,7 +78,6 @@ echo "=> Creating restore script"
 rm -f /restore.sh
 cat <<EOF >> /restore.sh
 #!/bin/bash
-
 if [ -z \$2 ]; then
 	echo "=> Restore database from \$1"
     if mysql -h${MYSQL_HOST} -P${MYSQL_PORT} -u${MYSQL_USER} -p${MYSQL_PASS} < \$1 ;then	
